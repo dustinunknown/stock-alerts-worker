@@ -44,8 +44,14 @@ async function checkAndSendAlerts() {
       try {
         const stockUrl = `https://finnhub.io/api/v1/quote?symbol=${ticker}&token=${FINNHUB_API_KEY}`;
         const response = await axios.get(stockUrl);
-        if (response.data && response.data.c) {
-          priceMap[ticker] = response.data.c;
+        
+        if (response.data && response.data.c !== undefined) {
+          // FIX: Group price, dollar change (d), and percent change (dp) together into an object
+          priceMap[ticker] = {
+            price: response.data.c,
+            change: response.data.d || 0,
+            percentChange: response.data.dp || 0
+          };
         }
       } catch (tickerError) {
         console.error(`   [API Error] Failed fetching market data for ${ticker}:`, tickerError.message);
@@ -56,7 +62,6 @@ async function checkAndSendAlerts() {
     const pushBatch = [];
     const emailBatch = [];
 
-// 4. COMPILATION: Match live pricing data back to individual user configurations
     // 4. COMPILATION: Match live pricing data back to individual user configurations
     for (const alert of alerts) {
       const stockData = priceMap[alert.ticker]; 
@@ -79,8 +84,8 @@ async function checkAndSendAlerts() {
       const msgBody = `${alert.ticker} is currently trading at $${livePrice.toFixed(2)}.`;
 
       // Premium Touch: Dynamically swap the badge label if displaying after-hours data
-      const isAfterHours = (typeof stockData === 'object' && stockData !== null) && (!stockData.change && (stockData.postMarketChange || stockData.extendedChange));
-      const marketLabel = isAfterHours ? 'After Hours' : 'Today';
+      const isAfterHours = (changeValue === 0 && changePercent === 0);
+      const marketLabel = isAfterHours ? 'At Close' : 'Today';
 
       const isPositive = changeValue >= 0;
       const changeColor = isPositive ? '#30d158' : '#ff453a'; 
@@ -156,7 +161,6 @@ async function checkAndSendAlerts() {
     // 6. BULK DISPATCH EMAILS: Process the email payload queue asynchronously
     if (emailBatch.length > 0) {
       console.log(`   Dispatched ${emailBatch.length} inbox transmissions to mail queue...`);
-      // Note: Resend supports sending array payloads on paid plans. For mass free tier/testing, execute concurrently:
       await Promise.allSettled(emailBatch.map(emailPayload => resend.emails.send(emailPayload)));
       console.log(`   ✓ All inbox deliveries dispatched.`);
     }
