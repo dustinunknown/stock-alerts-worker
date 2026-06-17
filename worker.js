@@ -76,9 +76,9 @@ async function checkAndSendAlerts() {
       // Queue email dispatches
       if (alert.send_email && alert.email) {
         emailBatch.push({
-          from: 'alerts@yourdomain.com', // Replace with your authenticated custom sending domain later
+          from: 'StockAlerts <alerts@stockalertapp.net>',
           to: alert.alert_email || alert.email,
-          subject: `Market Trigger: ${alert.ticker}`,
+          subject: `Market Alert: ${alert.ticker}`,
           text: `StockAlert Notice: ${msgBody}`
         });
       }
