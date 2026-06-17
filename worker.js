@@ -81,7 +81,13 @@ async function checkAndSendAlerts() {
 
       if (!livePrice || isNaN(livePrice)) continue;
 
-      const msgBody = `${alert.ticker} is currently trading at $${livePrice.toFixed(2)}.`;
+      // Dynamic text modifier: reads "today" during market hours, or "at close" after hours
+      const timingPhrase = marketLabel.toLowerCase(); // turns 'Today' into 'today' or 'At Close' into 'at close'
+
+      // 1. ADAPTIVE BODY TEXT
+      // Open: "SPYM is trading at $87.50 (+0.45%) today."
+      // Closed: "SPYM is trading at $87.00 (+0.00%) at close."
+      const msgBody = `${alert.ticker} is trading at $${livePrice.toFixed(2)} (${formattedPercent}) ${timingPhrase}.`;
 
       // Premium Touch: Dynamically swap the badge label if displaying after-hours data
       const isAfterHours = (changeValue === 0 && changePercent === 0);
@@ -97,7 +103,14 @@ async function checkAndSendAlerts() {
         pushBatch.push({
           to: alert.push_token,
           sound: 'default',
-          title: `📈 Market Notification: ${alert.ticker}`,
+          
+          // 2. DYNAMIC BOLD TITLE
+          // Open/Moving: "📈 SPYM Alert: +$0.38"
+          // Flat/Closed: "📊 SPYM Alert: $87.00"
+          title: changeValue !== 0 
+            ? `📈 ${alert.ticker} Alert: ${formattedChange}` 
+            : `📊 ${alert.ticker} Alert: $${livePrice.toFixed(2)}`,
+            
           body: msgBody,
         });
       }
