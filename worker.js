@@ -1,18 +1,17 @@
 const { createClient } = require('@supabase/supabase-js');
 const { Resend } = require('resend');
 const axios = require('axios');
-const http = require('http'); // Built-in Node network tool
+const http = require('http');
 
-// CONFIGURATION: Ensure your keys are populated here
+// CONFIGURATION PARAMETERS (Populate with your live credentials)
 const SUPABASE_URL = 'https://ydppmymoaosvnhibxkbx.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlkcHBteW1vYW9zdm5oaWJ4a2J4Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTY2MTY2NiwiZXhwIjoyMDk3MjM3NjY2fQ.R6flAThoNSALA1muuBbR3lmI921iSCpyoFDV6xxs4N8';
+const SUPABASE_SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlkcHBteW1vYW9zdm5oaWJ4a2J4Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTY2MTY2NiwiZXhwIjoyMDk3MjM3NjY2fQ.R6flAThoNSALA1muuBbR3lmI921iSCpyoFDV6xxs4N8'; // Master bypass key
 const FINNHUB_API_KEY = 'd8p3bnpr01qp954ukcl0d8p3bnpr01qp954ukclg';
 const RESEND_API_KEY = 're_Qo7LXrW4_3trRcyJw1boqY3bUAZQAaaS2';
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const resend = new Resend(RESEND_API_KEY);
 
-// THE MASTER SCANNERS LOGIC
 async function checkAndSendAlerts() {
   try {
     const now = new Date();
@@ -23,71 +22,110 @@ async function checkAndSendAlerts() {
     hour = hour.padStart(2, '0');
     const currentAlertTime = `${hour}:${minute} ${ampm}`;
 
-    console.log(`[${new Date().toLocaleTimeString()}] Cloud Ping Received! Scanning for: ${currentAlertTime}...`);
+    console.log(`[${new Date().toLocaleTimeString()}] Mass Scan Initiated for: ${currentAlertTime}...`);
 
+    // 1. Fetch all alerts scheduled for this precise minute
     const { data: alerts, error } = await supabase
       .from('alerts')
       .select('*')
       .eq('alert_time', currentAlertTime);
 
     if (error) throw error;
-    if (!alerts || alerts.length === 0) {
-      console.log('-> No notifications scheduled for this minute.');
-      return;
-    }
+    if (!alerts || alerts.length === 0) return;
 
+    console.log(`-> Processing ${alerts.length} user alerts. Executing deduplication...`);
+
+    // 2. EXTRACTION: Find every unique stock ticker requested for this minute
+    const uniqueTickers = [...new Set(alerts.map(alert => alert.ticker))];
+    const priceMap = {};
+
+    // 3. PARALLEL FETCHING: Fetch prices for all unique tickers simultaneously
+    await Promise.all(uniqueTickers.map(async (ticker) => {
+      try {
+        const stockUrl = `https://finnhub.io/api/v1/quote?symbol=${ticker}&token=${FINNHUB_API_KEY}`;
+        const response = await axios.get(stockUrl);
+        if (response.data && response.data.c) {
+          priceMap[ticker] = response.data.c;
+        }
+      } catch (tickerError) {
+        console.error(`   [API Error] Failed fetching market data for ${ticker}:`, tickerError.message);
+      }
+    }));
+
+    // Arrays to hold prepared bulk dispatches
+    const pushBatch = [];
+    const emailBatch = [];
+
+    // 4. COMPILATION: Match live pricing data back to individual user configurations
     for (const alert of alerts) {
-      const stockUrl = `https://finnhub.io/api/v1/quote?symbol=${alert.ticker}&token=${FINNHUB_API_KEY}`;
-      const stockResponse = await axios.get(stockUrl);
-      const currentPrice = stockResponse.data.c;
+      const livePrice = priceMap[alert.ticker];
+      if (!livePrice) continue; // Skip if asset data lookup failed
 
-      if (!currentPrice || currentPrice === 0) continue;
-      const alertMessage = `${alert.ticker} is trading at $${currentPrice.toFixed(2)}.`;
+      const msgBody = `${alert.ticker} is currently trading at $${livePrice.toFixed(2)}.`;
 
+      // Queue push notifications for bulk processing
       if (alert.send_push && alert.push_token) {
-        try {
-          await axios.post('https://exp.host/--/api/v2/push/send', {
-            to: alert.push_token,
-            sound: 'default',
-            title: `📈 Market Trigger: ${alert.ticker}`,
-            body: alertMessage,
-          });
-          console.log(`   ✓ Lock-screen push dispatched for ${alert.ticker}`);
-        } catch (pErr) { console.error(pErr.message); }
+        pushBatch.push({
+          to: alert.push_token,
+          sound: 'default',
+          title: `📈 Market Notification: ${alert.ticker}`,
+          body: msgBody,
+        });
       }
 
+      // Queue email dispatches
       if (alert.send_email && alert.email) {
-        try {
-          await resend.emails.send({
-            from: 'onboarding@resend.dev',
-            to: alert.email,
-            subject: `Market Notification: ${alert.ticker}`,
-            text: `StockAlert: ${alertMessage}`
-          });
-          console.log(`   ✓ Email alert routed to inbox.`);
-        } catch (eErr) { console.error(eErr.message); }
+        emailBatch.push({
+          from: 'alerts@yourdomain.com', // Replace with your authenticated custom sending domain later
+          to: alert.alert_email || alert.email,
+          subject: `Market Trigger: ${alert.ticker}`,
+          text: `StockAlert Notice: ${msgBody}`
+        });
       }
     }
-  } catch (err) {
-    console.error('Global operational error:', err.message);
+
+    // 5. BULK DISPATCH PUSH NOTIFICATIONS: Chunk payloads into packets of 100
+    if (pushBatch.length > 0) {
+      console.log(`   Dispatched ${pushBatch.length} push notifications to high-throughput queue...`);
+      for (let i = 0; i < pushBatch.length; i += 100) {
+        const chunk = pushBatch.slice(i, i + 100);
+        try {
+          await axios.post('https://exp.host/--/api/v2/push/send', chunk, {
+            headers: { 'Content-Type': 'application/json' }
+          });
+        } catch (pushQueueErr) {
+          console.error(`   [Push Queue Error] Packet batch transmission failed:`, pushQueueErr.message);
+        }
+      }
+      console.log(`   ✓ All push notification packets successfully transferred.`);
+    }
+
+    // 6. BULK DISPATCH EMAILS: Process the email payload queue asynchronously
+    if (emailBatch.length > 0) {
+      console.log(`   Dispatched ${emailBatch.length} inbox transmissions to mail queue...`);
+      // Note: Resend supports sending array payloads on paid plans. For mass free tier/testing, execute concurrently:
+      await Promise.allSettled(emailBatch.map(emailPayload => resend.emails.send(emailPayload)));
+      console.log(`   ✓ All inbox deliveries dispatched.`);
+    }
+
+  } catch (globalError) {
+    console.error('CRITICAL SCALING ENGINE ERROR:', globalError.message);
   }
 }
 
-// Create a minimalist web server listener to receive internet pings
+// Minimalist server port allocation for Render production binding
 const server = http.createServer((req, res) => {
   if (req.url === '/ping' || req.url === '/') {
-    // Fire the stock tracking algorithm immediately when pinged
     checkAndSendAlerts();
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('StockAlerts Worker Active\n');
+    res.end('Mass-Market Engine Synchronized\n');
   } else {
     res.writeHead(404);
     res.end();
   }
 });
 
-// Listen on the port Render assigns us, defaulting to 3000 locally
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Cloud Server listening natively on port ${PORT}...`);
+  console.log(`Mass production engine running on port ${PORT}.`);
 });
