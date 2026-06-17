@@ -57,21 +57,31 @@ async function checkAndSendAlerts() {
     const emailBatch = [];
 
 // 4. COMPILATION: Match live pricing data back to individual user configurations
+    // 4. COMPILATION: Match live pricing data back to individual user configurations
     for (const alert of alerts) {
       const stockData = priceMap[alert.ticker]; 
       if (!stockData) continue;
 
-      // CRASH-PROOF FALLBACK: Safely unpacks whether stockData is a full object or just a raw number
+      // Unpack raw numbers vs objects safely
       const livePrice = (typeof stockData === 'object' && stockData !== null) ? stockData.price : Number(stockData);
-      const changeValue = (typeof stockData === 'object' && stockData !== null) ? (stockData.change || 0) : 0;
-      const changePercent = (typeof stockData === 'object' && stockData !== null) ? (stockData.percentChange || 0) : 0;
+      
+      // AFTER-HOURS PIVOT: If regular session changes are 0, look for common extended market API keys
+      const changeValue = (typeof stockData === 'object' && stockData !== null) 
+        ? (stockData.change || stockData.postMarketChange || stockData.extendedChange || 0) 
+        : 0;
+        
+      const changePercent = (typeof stockData === 'object' && stockData !== null) 
+        ? (stockData.percentChange || stockData.postMarketChangePercent || stockData.extendedChangePercent || 0) 
+        : 0;
 
-      // Sanity check to prevent code calculation crashes
       if (!livePrice || isNaN(livePrice)) continue;
 
       const msgBody = `${alert.ticker} is currently trading at $${livePrice.toFixed(2)}.`;
 
-      // Dynamic UI Stylers based on market performance
+      // Premium Touch: Dynamically swap the badge label if displaying after-hours data
+      const isAfterHours = (typeof stockData === 'object' && stockData !== null) && (!stockData.change && (stockData.postMarketChange || stockData.extendedChange));
+      const marketLabel = isAfterHours ? 'After Hours' : 'Today';
+
       const isPositive = changeValue >= 0;
       const changeColor = isPositive ? '#30d158' : '#ff453a'; 
       const formattedChange = isPositive ? `+$${changeValue.toFixed(2)}` : `-$${Math.abs(changeValue).toFixed(2)}`;
