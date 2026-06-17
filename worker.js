@@ -58,8 +58,19 @@ async function checkAndSendAlerts() {
 
     // 4. COMPILATION: Match live pricing data back to individual user configurations
     for (const alert of alerts) {
-      const livePrice = priceMap[alert.ticker];
-      if (!livePrice) continue; // Skip if asset data lookup failed
+      // Assuming your price data source provides an object with price, daily change, and daily percent change:
+      const stockData = priceMap[alert.ticker]; 
+      if (!stockData) continue;
+
+      const livePrice = stockData.price;
+      const changeValue = stockData.change;           // e.g., 1.24 or -3.50
+      const changePercent = stockData.percentChange;  // e.g., 0.85 or -1.20
+
+      // Dynamic UI Stylers based on market performance
+      const isPositive = changeValue >= 0;
+      const changeColor = isPositive ? '#30d158' : '#ff453a'; // Apple Green vs Apple Red
+      const formattedChange = isPositive ? `+$${changeValue.toFixed(2)}` : `-$${Math.abs(changeValue).toFixed(2)}`;
+      const formattedPercent = isPositive ? `+${changePercent.toFixed(2)}%` : `${changePercent.toFixed(2)}%`;
 
       const msgBody = `${alert.ticker} is currently trading at $${livePrice.toFixed(2)}.`;
 
@@ -73,25 +84,30 @@ async function checkAndSendAlerts() {
         });
       }
 
-  // Queue email dispatches with minimalist HTML layout
+// Queue email dispatches with minimalist HTML layout
       if (alert.send_email && alert.email) {
-        // Construct a clean, data-dense subject line: "AAPL: $175.50 at 09:30 AM"
-        const emailSubject = `${alert.ticker}: $${livePrice.toFixed(2)} at ${alert.alert_time}`;
+        // Updated data-dense subject line: "AAPL: $175.50 (+1.25%)"
+        const emailSubject = `${alert.ticker}: $${livePrice.toFixed(2)} (${formattedPercent}) at ${alert.alert_time}`;
 
         const cleanHtml = `
           <div style="background-color: #121214; padding: 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #ffffff; border-radius: 12px; max-width: 400px; margin: 0 auto; border: 1px solid #2c2c2e;">
-            <div style="font-size: 11px; color: #30d158; font-weight: 600; letter-spacing: 1px; margin-bottom: 16px;">STOCKALERTS EXECUTION</div>
+            <div style="font-size: 11px; color: #8e8e93; font-weight: 600; letter-spacing: 1px; margin-bottom: 16px;">STOCK ALERTS DISPATCH</div>
             
             <div style="background-color: #1c1c1e; padding: 16px; border-radius: 8px; border: 1px solid #2c2c2e; margin-bottom: 12px;">
-              <div style="font-size: 10px; color: #8e8e93; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 4px;">ASSET PRICE</div>
-              <div style="font-size: 24px; font-weight: 700; color: #ffffff;">
-                ${alert.ticker} <span style="color: #30d158; margin-left: 6px;">$${livePrice.toFixed(2)}</span>
+              <div style="font-size: 10px; color: #8e8e93; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 6px;">CURRENT VALUE</div>
+              
+              <div style="font-size: 26px; font-weight: 700; color: #ffffff; line-height: 1.2;">
+                ${alert.ticker} <span style="font-weight: 500; margin-left: 4px;">$${livePrice.toFixed(2)}</span>
+              </div>
+              
+              <div style="font-size: 14px; font-weight: 600; color: ${changeColor}; margin-top: 6px; letter-spacing: -0.2px;">
+                ${formattedChange} (${formattedPercent}) <span style="color: #636366; font-size: 11px; font-weight: 400; margin-left: 4px;">Today</span>
               </div>
             </div>
 
             <div style="background-color: #1c1c1e; padding: 16px; border-radius: 8px; border: 1px solid #2c2c2e;">
               <div style="font-size: 10px; color: #8e8e93; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 4px;">TRIGGER SCHEDULE</div>
-              <div style="font-size: 16px; font-weight: 600; color: #ffffff;">Fired daily at ${alert.alert_time}</div>
+              <div style="font-size: 15px; font-weight: 600; color: #ffffff;">Fired daily at ${alert.alert_time}</div>
             </div>
             
             <div style="font-size: 10px; color: #636366; text-align: center; margin-top: 24px; padding-top: 12px; border-top: 1px solid #2c2c2e;">
@@ -101,7 +117,7 @@ async function checkAndSendAlerts() {
         `;
 
         emailBatch.push({
-          from: 'StockAlerts <alerts@stockalertapp.net>',
+          from: 'Stock Alerts <alerts@stockalertapp.net>',
           to: alert.alert_email || alert.email,
           subject: emailSubject,
           html: cleanHtml
