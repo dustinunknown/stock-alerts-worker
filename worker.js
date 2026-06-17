@@ -5,7 +5,7 @@ const http = require('http'); // Built-in Node network tool
 
 // CONFIGURATION: Ensure your keys are populated here
 const SUPABASE_URL = 'https://ydppmymoaosvnhibxkbx.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlkcHBteW1vYW9zdm5oaWJ4a2J4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2NjE2NjYsImV4cCI6MjA5NzIzNzY2Nn0.aCRS4Or8fmNV7KQukx2wflSlBCNFC9nZIItb-I2Q2Jg';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlkcHBteW1vYW9zdm5oaWJ4a2J4Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTY2MTY2NiwiZXhwIjoyMDk3MjM3NjY2fQ.R6flAThoNSALA1muuBbR3lmI921iSCpyoFDV6xxs4N8';
 const FINNHUB_API_KEY = 'd8p3bnpr01qp954ukcl0d8p3bnpr01qp954ukclg';
 const RESEND_API_KEY = 're_Qo7LXrW4_3trRcyJw1boqY3bUAZQAaaS2';
 
