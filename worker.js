@@ -73,13 +73,38 @@ async function checkAndSendAlerts() {
         });
       }
 
-      // Queue email dispatches
+  // Queue email dispatches with minimalist HTML layout
       if (alert.send_email && alert.email) {
+        // Construct a clean, data-dense subject line: "AAPL: $175.50 at 09:30 AM"
+        const emailSubject = `${alert.ticker}: $${livePrice.toFixed(2)} at ${alert.alert_time}`;
+
+        const cleanHtml = `
+          <div style="background-color: #121214; padding: 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #ffffff; border-radius: 12px; max-width: 400px; margin: 0 auto; border: 1px solid #2c2c2e;">
+            <div style="font-size: 11px; color: #30d158; font-weight: 600; letter-spacing: 1px; margin-bottom: 16px;">STOCKALERTS EXECUTION</div>
+            
+            <div style="background-color: #1c1c1e; padding: 16px; border-radius: 8px; border: 1px solid #2c2c2e; margin-bottom: 12px;">
+              <div style="font-size: 10px; color: #8e8e93; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 4px;">ASSET PRICE</div>
+              <div style="font-size: 24px; font-weight: 700; color: #ffffff;">
+                ${alert.ticker} <span style="color: #30d158; margin-left: 6px;">$${livePrice.toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div style="background-color: #1c1c1e; padding: 16px; border-radius: 8px; border: 1px solid #2c2c2e;">
+              <div style="font-size: 10px; color: #8e8e93; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 4px;">TRIGGER SCHEDULE</div>
+              <div style="font-size: 16px; font-weight: 600; color: #ffffff;">Fired daily at ${alert.alert_time}</div>
+            </div>
+            
+            <div style="font-size: 10px; color: #636366; text-align: center; margin-top: 24px; padding-top: 12px; border-top: 1px solid #2c2c2e;">
+              Sent securely to ${alert.email}. Manage parameters inside your app.
+            </div>
+          </div>
+        `;
+
         emailBatch.push({
           from: 'StockAlerts <alerts@stockalertapp.net>',
           to: alert.alert_email || alert.email,
-          subject: `Market Alert: ${alert.ticker}`,
-          text: `StockAlert Notice: ${msgBody}`
+          subject: emailSubject,
+          html: cleanHtml
         });
       }
     }
