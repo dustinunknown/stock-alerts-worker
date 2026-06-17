@@ -46,7 +46,7 @@ async function checkAndSendAlerts() {
         const response = await axios.get(stockUrl);
         
         if (response.data && response.data.c !== undefined) {
-          // FIX: Group price, dollar change (d), and percent change (dp) together into an object
+          // Group price, dollar change (d), and percent change (dp) together into an object
           priceMap[ticker] = {
             price: response.data.c,
             change: response.data.d || 0,
@@ -81,36 +81,28 @@ async function checkAndSendAlerts() {
 
       if (!livePrice || isNaN(livePrice)) continue;
 
-      // Dynamic text modifier: reads "today" during market hours, or "at close" after hours
-      const timingPhrase = marketLabel.toLowerCase(); // turns 'Today' into 'today' or 'At Close' into 'at close'
-
-      // 1. ADAPTIVE BODY TEXT
-      // Open: "SPYM is trading at $87.50 (+0.45%) today."
-      // Closed: "SPYM is trading at $87.00 (+0.00%) at close."
-      const msgBody = `${alert.ticker} is trading at $${livePrice.toFixed(2)} (${formattedPercent}) ${timingPhrase}.`;
-
-      // Premium Touch: Dynamically swap the badge label if displaying after-hours data
+      // FIXED VARIABLE ORDERING: Market context variables defined first
       const isAfterHours = (changeValue === 0 && changePercent === 0);
       const marketLabel = isAfterHours ? 'At Close' : 'Today';
+      const timingPhrase = marketLabel.toLowerCase();
 
+      // Metrics styling components defined second
       const isPositive = changeValue >= 0;
       const changeColor = isPositive ? '#30d158' : '#ff453a'; 
       const formattedChange = isPositive ? `+$${changeValue.toFixed(2)}` : `-$${Math.abs(changeValue).toFixed(2)}`;
       const formattedPercent = isPositive ? `+${changePercent.toFixed(2)}%` : `${changePercent.toFixed(2)}%`;
+
+      // Content text blocks compiled third (now that all references are born)
+      const msgBody = `${alert.ticker} is trading at $${livePrice.toFixed(2)} (${formattedPercent}) ${timingPhrase}.`;
 
       // Queue push notifications for bulk processing
       if (alert.send_push && alert.push_token) {
         pushBatch.push({
           to: alert.push_token,
           sound: 'default',
-          
-          // 2. DYNAMIC BOLD TITLE
-          // Open/Moving: "📈 SPYM Alert: +$0.38"
-          // Flat/Closed: "📊 SPYM Alert: $87.00"
           title: changeValue !== 0 
             ? `📈 ${alert.ticker} Alert: ${formattedChange}` 
             : `📊 ${alert.ticker} Alert: $${livePrice.toFixed(2)}`,
-            
           body: msgBody,
         });
       }
