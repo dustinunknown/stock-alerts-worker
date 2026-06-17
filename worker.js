@@ -24,6 +24,17 @@ async function checkAndSendAlerts() {
 
     console.log(`[${new Date().toLocaleTimeString()}] Mass Scan Initiated for: ${currentAlertTime}...`);
 
+    // CLOCK-BASED MARKET HOURLY CHECK (Wall-clock monitoring)
+    const pacificDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+    const laDay = pacificDate.getDay(); // 0 = Sunday, 6 = Saturday
+    const laHour = pacificDate.getHours();
+    const laMinute = pacificDate.getMinutes();
+
+    // NYSE/NASDAQ regular session: Mon-Fri, 6:30 AM to 1:00 PM Pacific Time
+    const isMarketOpen = (laDay >= 1 && laDay <= 5) && 
+                         ((laHour === 6 && laMinute >= 30) || (laHour > 6 && laHour < 13));
+    const isAfterHours = !isMarketOpen;
+
     // 1. Fetch all alerts scheduled for this precise minute
     const { data: alerts, error } = await supabase
       .from('alerts')
@@ -46,7 +57,6 @@ async function checkAndSendAlerts() {
         const response = await axios.get(stockUrl);
         
         if (response.data && response.data.c !== undefined) {
-          // Group price, dollar change (d), and percent change (dp) together into an object
           priceMap[ticker] = {
             price: response.data.c,
             change: response.data.d || 0,
@@ -69,30 +79,22 @@ async function checkAndSendAlerts() {
 
       // Unpack raw numbers vs objects safely
       const livePrice = (typeof stockData === 'object' && stockData !== null) ? stockData.price : Number(stockData);
-      
-      // AFTER-HOURS PIVOT: If regular session changes are 0, look for common extended market API keys
-      const changeValue = (typeof stockData === 'object' && stockData !== null) 
-        ? (stockData.change || stockData.postMarketChange || stockData.extendedChange || 0) 
-        : 0;
-        
-      const changePercent = (typeof stockData === 'object' && stockData !== null) 
-        ? (stockData.percentChange || stockData.postMarketChangePercent || stockData.extendedChangePercent || 0) 
-        : 0;
+      const changeValue = (typeof stockData === 'object' && stockData !== null) ? (stockData.change || 0) : 0;
+      const changePercent = (typeof stockData === 'object' && stockData !== null) ? (stockData.percentChange || 0) : 0;
 
       if (!livePrice || isNaN(livePrice)) continue;
 
-      // FIXED VARIABLE ORDERING: Market context variables defined first
-      const isAfterHours = (changeValue === 0 && changePercent === 0);
+      // Labels adjust based on our precise clock calculations above
       const marketLabel = isAfterHours ? 'At Close' : 'Today';
       const timingPhrase = marketLabel.toLowerCase();
 
-      // Metrics styling components defined second
+      // Metrics styling components
       const isPositive = changeValue >= 0;
       const changeColor = isPositive ? '#30d158' : '#ff453a'; 
       const formattedChange = isPositive ? `+$${changeValue.toFixed(2)}` : `-$${Math.abs(changeValue).toFixed(2)}`;
       const formattedPercent = isPositive ? `+${changePercent.toFixed(2)}%` : `${changePercent.toFixed(2)}%`;
 
-      // Content text blocks compiled third (now that all references are born)
+      // Content text blocks compiled safely
       const msgBody = `${alert.ticker} is trading at $${livePrice.toFixed(2)} (${formattedPercent}) ${timingPhrase}.`;
 
       // Queue push notifications for bulk processing
