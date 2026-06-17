@@ -103,7 +103,7 @@ async function checkAndSendAlerts() {
 
         const cleanHtml = `
           <div style="background-color: #121214; padding: 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #ffffff; border-radius: 12px; max-width: 400px; margin: 0 auto; border: 1px solid #2c2c2e;">
-            <div style="font-size: 11px; color: #8e8e93; font-weight: 600; letter-spacing: 1px; margin-bottom: 16px;">STOCK ALERTS DISPATCH</div>
+            <div style="font-size: 11px; color: #8e8e93; font-weight: 600; letter-spacing: 1px; margin-bottom: 16px;">STOCK ALERT</div>
             
             <div style="background-color: #1c1c1e; padding: 16px; border-radius: 8px; border: 1px solid #2c2c2e; margin-bottom: 12px;">
               <div style="font-size: 10px; color: #8e8e93; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 6px;">CURRENT VALUE</div>
@@ -113,17 +113,17 @@ async function checkAndSendAlerts() {
               </div>
               
               <div style="font-size: 14px; font-weight: 600; color: ${changeColor}; margin-top: 6px; letter-spacing: -0.2px;">
-                ${formattedChange} (${formattedPercent}) <span style="color: #636366; font-size: 11px; font-weight: 400; margin-left: 4px;">Today</span>
+                ${formattedChange} (${formattedPercent}) <span style="color: #636366; font-size: 11px; font-weight: 400; margin-left: 4px;">${marketLabel}</span>
               </div>
             </div>
 
             <div style="background-color: #1c1c1e; padding: 16px; border-radius: 8px; border: 1px solid #2c2c2e;">
               <div style="font-size: 10px; color: #8e8e93; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 4px;">TRIGGER SCHEDULE</div>
-              <div style="font-size: 15px; font-weight: 600; color: #ffffff;">Fired daily at ${alert.alert_time}</div>
+              <div style="font-size: 15px; font-weight: 600; color: #ffffff;">Daily at ${alert.alert_time}</div>
             </div>
             
             <div style="font-size: 10px; color: #636366; text-align: center; margin-top: 24px; padding-top: 12px; border-top: 1px solid #2c2c2e;">
-              Sent securely to ${alert.email}. Manage parameters inside your app.
+              Sent securely to ${alert.email}. Manage alerts in the app.
             </div>
           </div>
         `;
