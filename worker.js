@@ -56,23 +56,26 @@ async function checkAndSendAlerts() {
     const pushBatch = [];
     const emailBatch = [];
 
-    // 4. COMPILATION: Match live pricing data back to individual user configurations
+// 4. COMPILATION: Match live pricing data back to individual user configurations
     for (const alert of alerts) {
-      // Assuming your price data source provides an object with price, daily change, and daily percent change:
       const stockData = priceMap[alert.ticker]; 
       if (!stockData) continue;
 
-      const livePrice = stockData.price;
-      const changeValue = stockData.change;           // e.g., 1.24 or -3.50
-      const changePercent = stockData.percentChange;  // e.g., 0.85 or -1.20
+      // CRASH-PROOF FALLBACK: Safely unpacks whether stockData is a full object or just a raw number
+      const livePrice = (typeof stockData === 'object' && stockData !== null) ? stockData.price : Number(stockData);
+      const changeValue = (typeof stockData === 'object' && stockData !== null) ? (stockData.change || 0) : 0;
+      const changePercent = (typeof stockData === 'object' && stockData !== null) ? (stockData.percentChange || 0) : 0;
+
+      // Sanity check to prevent code calculation crashes
+      if (!livePrice || isNaN(livePrice)) continue;
+
+      const msgBody = `${alert.ticker} is currently trading at $${livePrice.toFixed(2)}.`;
 
       // Dynamic UI Stylers based on market performance
       const isPositive = changeValue >= 0;
-      const changeColor = isPositive ? '#30d158' : '#ff453a'; // Apple Green vs Apple Red
+      const changeColor = isPositive ? '#30d158' : '#ff453a'; 
       const formattedChange = isPositive ? `+$${changeValue.toFixed(2)}` : `-$${Math.abs(changeValue).toFixed(2)}`;
       const formattedPercent = isPositive ? `+${changePercent.toFixed(2)}%` : `${changePercent.toFixed(2)}%`;
-
-      const msgBody = `${alert.ticker} is currently trading at $${livePrice.toFixed(2)}.`;
 
       // Queue push notifications for bulk processing
       if (alert.send_push && alert.push_token) {
@@ -84,9 +87,8 @@ async function checkAndSendAlerts() {
         });
       }
 
-// Queue email dispatches with minimalist HTML layout
+      // Queue email dispatches with minimalist HTML layout
       if (alert.send_email && alert.email) {
-        // Updated data-dense subject line: "AAPL: $175.50 (+1.25%)"
         const emailSubject = `${alert.ticker}: $${livePrice.toFixed(2)} (${formattedPercent}) at ${alert.alert_time}`;
 
         const cleanHtml = `
