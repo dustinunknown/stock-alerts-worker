@@ -72,86 +72,131 @@ async function checkAndSendAlerts() {
     const pushBatch = [];
     const emailBatch = [];
 
-    // 4. COMPILATION: Match live pricing data back to individual user configurations
+   // 4. GROUPING ENGINE: Bucket alerts by user recipient to prevent spamming
+    const emailGroups = {}; // Maps email -> array of processed stock data
+    const pushGroups = {};  // Maps push_token -> array of processed stock data
+
     for (const alert of alerts) {
       const stockData = priceMap[alert.ticker]; 
       if (!stockData) continue;
 
-      // Unpack raw numbers vs objects safely
       const livePrice = (typeof stockData === 'object' && stockData !== null) ? stockData.price : Number(stockData);
       const changeValue = (typeof stockData === 'object' && stockData !== null) ? (stockData.change || 0) : 0;
       const changePercent = (typeof stockData === 'object' && stockData !== null) ? (stockData.percentChange || 0) : 0;
 
       if (!livePrice || isNaN(livePrice)) continue;
 
-      // Labels adjust based on our precise clock calculations above
+      const isAfterHours = (changeValue === 0 && changePercent === 0);
       const marketLabel = isAfterHours ? 'At Close' : 'Today';
       const timingPhrase = marketLabel.toLowerCase();
 
-      // Metrics styling components
       const isPositive = changeValue >= 0;
       const changeColor = isPositive ? '#30d158' : '#ff453a'; 
       const formattedChange = isPositive ? `+$${changeValue.toFixed(2)}` : `-$${Math.abs(changeValue).toFixed(2)}`;
       const formattedPercent = isPositive ? `+${changePercent.toFixed(2)}%` : `${changePercent.toFixed(2)}%`;
 
-      // Content text blocks compiled safely
-      const msgBody = `${alert.ticker} is trading at $${livePrice.toFixed(2)} (${formattedPercent}) ${timingPhrase}.`;
+      const assetSummary = {
+        ticker: alert.ticker,
+        livePrice: livePrice.toFixed(2),
+        changeValue,
+        formattedChange,
+        formattedPercent,
+        changeColor,
+        marketLabel,
+        timingPhrase
+      };
 
-      // Queue push notifications for bulk processing
-      if (alert.send_push && alert.push_token) {
-        pushBatch.push({
-          to: alert.push_token,
-          sound: 'default',
-          title: changeValue !== 0 
-            ? `📈 ${alert.ticker} Alert: ${formattedChange}` 
-            : `📊 ${alert.ticker} Alert: $${livePrice.toFixed(2)}`,
-          body: msgBody,
-        });
+      // Group for email channels
+      if (alert.send_email && alert.email) {
+        const targetEmail = alert.alert_email || alert.email;
+        if (!emailGroups[targetEmail]) emailGroups[targetEmail] = [];
+        emailGroups[targetEmail].push(assetSummary);
       }
 
-      // Queue email dispatches with minimalist HTML layout
-      if (alert.send_email && alert.email) {
-        const emailSubject = `${alert.ticker}: $${livePrice.toFixed(2)} (${formattedPercent}) at ${alert.alert_time}`;
-
-        const cleanHtml = `
-          <div style="background-color: #121214; padding: 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #ffffff; border-radius: 12px; max-width: 400px; margin: 0 auto; border: 1px solid #2c2c2e;">
-            <div style="font-size: 11px; color: #8e8e93; font-weight: 600; letter-spacing: 1px; margin-bottom: 16px;">STOCK ALERT</div>
-            
-            <div style="background-color: #1c1c1e; padding: 16px; border-radius: 8px; border: 1px solid #2c2c2e; margin-bottom: 12px;">
-              <div style="font-size: 10px; color: #8e8e93; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 6px;">CURRENT VALUE</div>
-              
-              <div style="font-size: 26px; font-weight: 700; color: #ffffff; line-height: 1.2;">
-                ${alert.ticker} <span style="font-weight: 500; margin-left: 4px; color: ${changeColor};">$${livePrice.toFixed(2)}</span>
-              </div>
-              
-              <div style="font-size: 14px; font-weight: 600; color: ${changeColor}; margin-top: 6px; letter-spacing: -0.2px;">
-                ${formattedChange} (${formattedPercent}) <span style="color: #636366; font-size: 11px; font-weight: 400; margin-left: 4px;">${marketLabel}</span>
-              </div>
-            </div>
-
-            <div style="background-color: #1c1c1e; padding: 16px; border-radius: 8px; border: 1px solid #2c2c2e;">
-              <div style="font-size: 10px; color: #8e8e93; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 4px;">TRIGGER SCHEDULE</div>
-              <div style="font-size: 15px; font-weight: 600; color: #ffffff;">Daily at ${alert.alert_time}</div>
-            </div>
-            
-            <div style="font-size: 10px; color: #636366; text-align: center; margin-top: 24px; padding-top: 12px; border-top: 1px solid #2c2c2e;">
-              Sent securely to ${alert.email}. Manage alerts in the app.
-            </div>
-          </div>
-        `;
-
-        emailBatch.push({
-          from: 'Stock Alerts <alerts@stockalertapp.net>',
-          to: alert.alert_email || alert.email,
-          subject: emailSubject,
-          html: cleanHtml
-        });
+      // Group for push notification channels
+      if (alert.send_push && alert.push_token) {
+        if (!pushGroups[alert.push_token]) pushGroups[alert.push_token] = [];
+        pushGroups[alert.push_token].push(assetSummary);
       }
     }
 
-    // 5. BULK DISPATCH PUSH NOTIFICATIONS: Chunk payloads into packets of 100
+    // 5. COMPILING BULK PACKETS
+    
+    // Compile Grouped Push Notifications
+    for (const [token, assets] of Object.entries(pushGroups)) {
+      let pushTitle = '';
+      let pushBody = '';
+
+      if (assets.length === 1) {
+        // Single alert layout remains classic
+        const item = assets[0];
+        pushTitle = item.changeValue !== 0 ? `📈 ${item.ticker} Alert: ${item.formattedChange}` : `📊 ${item.ticker} Alert: $${item.livePrice}`;
+        pushBody = `${item.ticker} is trading at $${item.livePrice} (${item.formattedPercent}) ${item.timingPhrase}.`;
+      } else {
+        // Multi-asset bundled summary text
+        pushTitle = `💼 Portfolio Alert: ${assets.length} Stocks Updated`;
+        pushBody = assets.map(a => `${a.ticker}: $${a.livePrice} (${a.formattedPercent})`).join(' | ');
+      }
+
+      pushBatch.push({
+        to: token,
+        sound: 'default',
+        title: pushTitle,
+        body: pushBody
+      });
+    }
+
+    // Compile Grouped HTML Emails
+    for (const [targetEmail, assets] of Object.entries(emailGroups)) {
+      const subjectTime = currentAlertTime;
+      const emailSubject = assets.length === 1 
+        ? `${assets[0].ticker}: $${assets[0].livePrice} (${assets[0].formattedPercent}) at ${subjectTime}`
+        : `Market Digest: ${assets.length} Alerts Synchronized at ${subjectTime}`;
+
+      // Build out dynamic rows for every asset inside the user's digest bundle
+      let assetsHtmlRows = '';
+      for (const item of assets) {
+        assetsHtmlRows += `
+          <div style="background-color: #1c1c1e; padding: 16px; border-radius: 8px; border: 1px solid #2c2c2e; margin-bottom: 12px;">
+            <div style="font-size: 10px; color: #8e8e93; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 6px;">CURRENT VALUE</div>
+            <div style="font-size: 24px; font-weight: 700; color: #ffffff; line-height: 1.2;">
+              ${item.ticker} <span style="font-weight: 500; margin-left: 4px; color: ${item.changeColor};">$${item.livePrice}</span>
+            </div>
+            <div style="font-size: 13px; font-weight: 600; color: ${item.changeColor}; margin-top: 4px; letter-spacing: -0.2px;">
+              ${item.formattedChange} (${item.formattedPercent}) <span style="color: #636366; font-size: 11px; font-weight: 400; margin-left: 4px;">${item.marketLabel}</span>
+            </div>
+          </div>
+        `;
+      }
+
+      const cleanHtml = `
+        <div style="background-color: #121214; padding: 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #ffffff; border-radius: 12px; max-width: 400px; margin: 0 auto; border: 1px solid #2c2c2e;">
+          <div style="font-size: 11px; color: #8e8e93; font-weight: 600; letter-spacing: 1px; margin-bottom: 16px;">STOCK MARKET DIGEST</div>
+          
+          ${assetsHtmlRows}
+
+          <div style="background-color: #1c1c1e; padding: 14px; border-radius: 8px; border: 1px solid #2c2c2e; margin-top: 4px;">
+            <div style="font-size: 10px; color: #8e8e93; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 2px;">TRIGGER SCHEDULE</div>
+            <div style="font-size: 14px; font-weight: 600; color: #ffffff;">Daily Batch at ${currentAlertTime}</div>
+          </div>
+          
+          <div style="font-size: 10px; color: #636366; text-align: center; margin-top: 24px; padding-top: 12px; border-top: 1px solid #2c2c2e;">
+            Sent securely to ${targetEmail}. Manage alerts in your app screen.
+          </div>
+        </div>
+      `;
+
+      emailBatch.push({
+        from: 'Stock Alerts <alerts@stockalertapp.net>',
+        to: targetEmail,
+        subject: emailSubject,
+        html: cleanHtml
+      });
+    }
+
+    // 6. HIGH-THROUGHPUT DISPATCH TRANSMISSIONS
     if (pushBatch.length > 0) {
-      console.log(`   Dispatched ${pushBatch.length} push notifications to high-throughput queue...`);
+      console.log(`   Dispatched ${pushBatch.length} unified push notification packages...`);
       for (let i = 0; i < pushBatch.length; i += 100) {
         const chunk = pushBatch.slice(i, i + 100);
         try {
@@ -159,15 +204,14 @@ async function checkAndSendAlerts() {
             headers: { 'Content-Type': 'application/json' }
           });
         } catch (pushQueueErr) {
-          console.error(`   [Push Queue Error] Packet batch transmission failed:`, pushQueueErr.message);
+          console.error(`   [Push Queue Error] Packet transmission failure:`, pushQueueErr.message);
         }
       }
       console.log(`   ✓ All push notification packets successfully transferred.`);
     }
 
-    // 6. BULK DISPATCH EMAILS: Process the email payload queue asynchronously
     if (emailBatch.length > 0) {
-      console.log(`   Dispatched ${emailBatch.length} inbox transmissions to mail queue...`);
+      console.log(`   Dispatched ${emailBatch.length} unified inbox packages...`);
       await Promise.allSettled(emailBatch.map(emailPayload => resend.emails.send(emailPayload)));
       console.log(`   ✓ All inbox deliveries dispatched.`);
     }
