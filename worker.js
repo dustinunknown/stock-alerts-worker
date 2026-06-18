@@ -143,8 +143,22 @@ async function checkAndSendAlerts() {
 
     console.log(`-> Processing ${alerts.length} user alerts. Executing deduplication...`);
 
-    // 2. EXTRACTION: Find every unique stock ticker requested for this minute
-    const uniqueTickers = [...new Set(alerts.map(alert => alert.ticker))];
+// 1. Fetch all alerts scheduled for this precise minute (Existing Step)
+    const { data: alerts, error } = await supabase
+      .from('alerts')
+      .select('*')
+      .eq('alert_time', currentAlertTime);
+
+    if (error) throw error;
+    if (!alerts || alerts.length === 0) return;
+
+    console.log(`-> Processing ${alerts.length} user alerts. Executing deduplication...`);
+
+    // 2. EXTRACTION: Unpack and isolate every single unique ticker hidden inside the lists
+    const uniqueTickers = [...new Set(alerts.flatMap(alert => 
+      alert.ticker.split(',').map(t => t.trim().toUpperCase())
+    ).filter(Boolean))];
+    
     const priceMap = {};
 
     // 3. PARALLEL FETCHING: Fetch prices for all unique tickers simultaneously
@@ -169,53 +183,57 @@ async function checkAndSendAlerts() {
     const pushBatch = [];
     const emailBatch = [];
 
-    // 4. GROUPING ENGINE: Bucket alerts by user recipient to prevent spamming
+    // 4. GROUPING ENGINE: Unpack multi-ticker rows and bucket them smoothly by recipient
     const emailGroups = {}; 
     const pushGroups = {};  
 
     for (const alert of alerts) {
-      // SMART FILTER CHECK: Safely blocks delivery if user toggled weekend/holiday restrictions
       if (alert.market_days_only && (isWeekend || isHoliday)) {
         continue; 
       }
 
-      const stockData = priceMap[alert.ticker]; 
-      if (!stockData) continue;
+      // Break the comma-separated row string back down into an active processing array
+      const rowTickers = alert.ticker.split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
 
-      const livePrice = (typeof stockData === 'object' && stockData !== null) ? stockData.price : Number(stockData);
-      const changeValue = (typeof stockData === 'object' && stockData !== null) ? (stockData.change || 0) : 0;
-      const changePercent = (typeof stockData === 'object' && stockData !== null) ? (stockData.percentChange || 0) : 0;
+      for (const currentTicker of rowTickers) {
+        const stockData = priceMap[currentTicker]; 
+        if (!stockData) continue;
 
-      if (!livePrice || isNaN(livePrice)) continue;
+        const livePrice = (typeof stockData === 'object' && stockData !== null) ? stockData.price : Number(stockData);
+        const changeValue = (typeof stockData === 'object' && stockData !== null) ? (stockData.change || 0) : 0;
+        const changePercent = (typeof stockData === 'object' && stockData !== null) ? (stockData.percentChange || 0) : 0;
 
-      const marketLabel = isAfterHours ? 'At Close' : 'Today';
-      const timingPhrase = marketLabel.toLowerCase();
+        if (!livePrice || isNaN(livePrice)) continue;
 
-      const isPositive = changeValue >= 0;
-      const changeColor = isPositive ? '#30d158' : '#ff453a'; 
-      const formattedChange = isPositive ? `+$${changeValue.toFixed(2)}` : `-$${Math.abs(changeValue).toFixed(2)}`;
-      const formattedPercent = isPositive ? `+${changePercent.toFixed(2)}%` : `${changePercent.toFixed(2)}%`;
+        const marketLabel = isAfterHours ? 'At Close' : 'Today';
+        const timingPhrase = marketLabel.toLowerCase();
 
-      const assetSummary = {
-        ticker: alert.ticker,
-        livePrice: livePrice.toFixed(2),
-        changeValue,
-        formattedChange,
-        formattedPercent,
-        changeColor,
-        marketLabel,
-        timingPhrase
-      };
+        const isPositive = changeValue >= 0;
+        const changeColor = isPositive ? '#30d158' : '#ff453a'; 
+        const formattedChange = isPositive ? `+$${changeValue.toFixed(2)}` : `-$${Math.abs(changeValue).toFixed(2)}`;
+        const formattedPercent = isPositive ? `+${changePercent.toFixed(2)}%` : `${changePercent.toFixed(2)}%`;
 
-      if (alert.send_email && alert.email) {
-        const targetEmail = alert.alert_email || alert.email;
-        if (!emailGroups[targetEmail]) emailGroups[targetEmail] = [];
-        emailGroups[targetEmail].push(assetSummary);
-      }
+        const assetSummary = {
+          ticker: currentTicker,
+          livePrice: livePrice.toFixed(2),
+          changeValue,
+          formattedChange,
+          formattedPercent,
+          changeColor,
+          marketLabel,
+          timingPhrase
+        };
 
-      if (alert.send_push && alert.push_token) {
-        if (!pushGroups[alert.push_token]) pushGroups[alert.push_token] = [];
-        pushGroups[alert.push_token].push(assetSummary);
+        if (alert.send_email && alert.email) {
+          const targetEmail = alert.alert_email || alert.email;
+          if (!emailGroups[targetEmail]) emailGroups[targetEmail] = [];
+          emailGroups[targetEmail].push(assetSummary);
+        }
+
+        if (alert.send_push && alert.push_token) {
+          if (!pushGroups[alert.push_token]) pushGroups[alert.push_token] = [];
+          pushGroups[alert.push_token].push(assetSummary);
+        }
       }
     }
 
