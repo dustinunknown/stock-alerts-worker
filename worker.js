@@ -14,7 +14,6 @@ const resend = new Resend(RESEND_API_KEY);
 
 // --- AUTOMATED CALENDAR UTILITIES ---
 
-// Helper to convert a Date object to clean standard YYYY-MM-DD
 function formatDateString(date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -22,7 +21,6 @@ function formatDateString(date) {
   return `${y}-${m}-${d}`;
 }
 
-// Helper to calculate floating weekdays (e.g., "3rd Monday of January")
 function getNthWeekday(year, month, dayOfWeek, n) {
   let date = new Date(year, month, 1);
   let count = 0;
@@ -35,7 +33,6 @@ function getNthWeekday(year, month, dayOfWeek, n) {
   }
 }
 
-// Helper to calculate the last Monday of a given month (Memorial Day)
 function getLastMonday(year, month) {
   let date = new Date(year, month + 1, 0); 
   while (date.getDay() !== 1) {
@@ -44,29 +41,27 @@ function getLastMonday(year, month) {
   return new Date(date);
 }
 
-// Helper to apply standard weekend observance layout rules (If Sunday -> Monday. If Saturday -> Friday)
 function getObservedDate(year, month, day, skipSaturdayObserved = false) {
   let d = new Date(year, month, day);
-  if (d.getDay() === 0) d.setDate(day + 1); // Move Sunday holiday to Monday
-  if (d.getDay() === 6 && !skipSaturdayObserved) d.setDate(day - 1); // Move Saturday holiday to Friday
+  if (d.getDay() === 0) d.setDate(day + 1); 
+  if (d.getDay() === 6 && !skipSaturdayObserved) d.setDate(day - 1); 
   return d;
 }
 
-// MASTER ENGINE: Dynamically generates the exact US Market Holidays for ANY year
 function getMarketHolidays(year) {
   const holidays = [];
 
-  // 1. New Year's Day (Jan 1 - NYSE doesn't observe preceding Friday if it falls on Saturday)
+  // 1. New Year's Day
   const ny = new Date(year, 0, 1);
   holidays.push(formatDateString(ny.getDay() === 0 ? new Date(year, 0, 2) : ny));
 
-  // 2. MLK Jr. Day (3rd Monday in January)
+  // 2. MLK Jr. Day
   holidays.push(formatDateString(getNthWeekday(year, 0, 1, 3)));
 
-  // 3. Presidents' Day (3rd Monday in February)
+  // 3. Presidents' Day
   holidays.push(formatDateString(getNthWeekday(year, 1, 1, 3)));
 
-  // 4. Good Friday (Calculated via Butcher-Meeus Easter algorithm)
+  // 4. Good Friday
   const a = year % 19; const b = Math.floor(year / 100); const c = year % 100;
   const d = Math.floor(b / 4); const e = b % 4; const f = Math.floor((b + 8) / 25);
   const g = Math.floor((b - f + 1) / 3); const h = (19 * a + b - d - g + 15) % 30;
@@ -77,29 +72,28 @@ function getMarketHolidays(year) {
   const goodFriday = new Date(year, easterMonth - 1, easterDay - 2);
   holidays.push(formatDateString(goodFriday));
 
-  // 5. Memorial Day (Last Monday in May)
+  // 5. Memorial Day
   holidays.push(formatDateString(getLastMonday(year, 4)));
 
-  // 6. Juneteenth (June 19 + Observance rules)
+  // 6. Juneteenth
   holidays.push(formatDateString(getObservedDate(year, 5, 19)));
 
-  // 7. Independence Day (July 4 + Observance rules)
+  // 7. Independence Day
   holidays.push(formatDateString(getObservedDate(year, 6, 4)));
 
-  // 8. Labor Day (1st Monday in September)
+  // 8. Labor Day
   holidays.push(formatDateString(getNthWeekday(year, 8, 1, 1)));
 
-  // 9. Thanksgiving Day (4th Thursday in November)
+  // 9. Thanksgiving Day
   holidays.push(formatDateString(getNthWeekday(year, 10, 4, 4)));
 
-  // 10. Christmas Day (December 25 + Observance rules)
+  // 10. Christmas Day
   holidays.push(formatDateString(getObservedDate(year, 11, 25)));
 
   return holidays;
 }
 
 // --- END AUTOMATED CALENDAR UTILITIES ---
-
 
 async function checkAndSendAlerts() {
   try {
@@ -113,26 +107,24 @@ async function checkAndSendAlerts() {
 
     console.log(`[${new Date().toLocaleTimeString()}] Mass Scan Initiated for: ${currentAlertTime}...`);
 
-    // AUTOMATED CALENDAR MATCHING
+    // Clock and Calendar Logic Processing
     const pacificDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
     const laDay = pacificDate.getDay(); 
     const laHour = pacificDate.getHours();
     const laMinute = pacificDate.getMinutes();
     const formatYear = pacificDate.getFullYear();
 
-    // Dynamically calculate the active year's calendar list on the fly!
     const activeMarketHolidays = getMarketHolidays(formatYear);
     const laDateString = formatDateString(pacificDate);
 
     const isWeekend = (laDay === 0 || laDay === 6);
     const isHoliday = activeMarketHolidays.includes(laDateString);
 
-    // NYSE/NASDAQ regular session: Mon-Fri, 6:30 AM to 1:00 PM Pacific Time
     const isMarketOpen = !isWeekend && !isHoliday && 
                          ((laHour === 6 && laMinute >= 30) || (laHour > 6 && laHour < 13));
     const isAfterHours = !isMarketOpen;
 
-    // 1. Fetch all alerts scheduled for this precise minute
+    // 1. UNIQUE DATABASE FETCH GATING LINE (Fixed Duplication Here)
     const { data: alerts, error } = await supabase
       .from('alerts')
       .select('*')
@@ -141,27 +133,16 @@ async function checkAndSendAlerts() {
     if (error) throw error;
     if (!alerts || alerts.length === 0) return;
 
-    console.log(`-> Processing ${alerts.length} user alerts. Executing deduplication...`);
+    console.log(`-> Processing ${alerts.length} user rows. Unpacking multi-ticker configurations...`);
 
-// 1. Fetch all alerts scheduled for this precise minute (Existing Step)
-    const { data: alerts, error } = await supabase
-      .from('alerts')
-      .select('*')
-      .eq('alert_time', currentAlertTime);
-
-    if (error) throw error;
-    if (!alerts || alerts.length === 0) return;
-
-    console.log(`-> Processing ${alerts.length} user alerts. Executing deduplication...`);
-
-    // 2. EXTRACTION: Unpack and isolate every single unique ticker hidden inside the lists
+    // 2. EXTRACTION: Unpack comma-separated list values safely
     const uniqueTickers = [...new Set(alerts.flatMap(alert => 
       alert.ticker.split(',').map(t => t.trim().toUpperCase())
     ).filter(Boolean))];
     
     const priceMap = {};
 
-    // 3. PARALLEL FETCHING: Fetch prices for all unique tickers simultaneously
+    // 3. PARALLEL FETCHING: Retrieve from Finnhub
     await Promise.all(uniqueTickers.map(async (ticker) => {
       try {
         const stockUrl = `https://finnhub.io/api/v1/quote?symbol=${ticker}&token=${FINNHUB_API_KEY}`;
@@ -179,11 +160,10 @@ async function checkAndSendAlerts() {
       }
     }));
 
-    // Arrays to hold prepared bulk dispatches
     const pushBatch = [];
     const emailBatch = [];
 
-    // 4. GROUPING ENGINE: Unpack multi-ticker rows and bucket them smoothly by recipient
+    // 4. GROUPING ENGINE: Process individual multi-ticker values inside user objects
     const emailGroups = {}; 
     const pushGroups = {};  
 
@@ -192,7 +172,6 @@ async function checkAndSendAlerts() {
         continue; 
       }
 
-      // Break the comma-separated row string back down into an active processing array
       const rowTickers = alert.ticker.split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
 
       for (const currentTicker of rowTickers) {
@@ -237,7 +216,7 @@ async function checkAndSendAlerts() {
       }
     }
 
-    // 5. COMPILING BULK PACKETS
+    // 5. PACKET COMPILATION 
     for (const [token, assets] of Object.entries(pushGroups)) {
       let pushTitle = '';
       let pushBody = '';
@@ -305,7 +284,7 @@ async function checkAndSendAlerts() {
       });
     }
 
-    // 6. HIGH-THROUGHPUT DISPATCH TRANSMISSIONS
+    // 6. BULK DISPATCH TRANSMISSIONS
     if (pushBatch.length > 0) {
       console.log(`   Dispatched ${pushBatch.length} unified push notification packages...`);
       for (let i = 0; i < pushBatch.length; i += 100) {
