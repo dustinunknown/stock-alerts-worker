@@ -271,7 +271,7 @@ async function checkAndSendAlerts() {
           </div>
           
           <div style="font-size: 10px; color: #636366; text-align: center; margin-top: 24px; padding-top: 12px; border-top: 1px solid #2c2c2e;">
-            Sent securely to ${targetEmail}. Manage alerts in your app screen.
+            Sent securely to ${targetEmail}. Manage alerts in your app.
           </div>
         </div>
       `;
