@@ -121,7 +121,7 @@ async function checkAndSendAlerts() {
               <div style="font-size: 10px; color: #8e8e93; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 6px;">CURRENT VALUE</div>
               
               <div style="font-size: 26px; font-weight: 700; color: #ffffff; line-height: 1.2;">
-                ${alert.ticker} <span style="font-weight: 500; margin-left: 4px;">$${livePrice.toFixed(2)}</span>
+                ${alert.ticker} <span style="font-weight: 500; margin-left: 4px; color: ${changeColor};">$${livePrice.toFixed(2)}</span>
               </div>
               
               <div style="font-size: 14px; font-weight: 600; color: ${changeColor}; margin-top: 6px; letter-spacing: -0.2px;">
