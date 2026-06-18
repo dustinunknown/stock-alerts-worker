@@ -12,6 +12,95 @@ const RESEND_API_KEY = 're_Qo7LXrW4_3trRcyJw1boqY3bUAZQAaaS2';
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const resend = new Resend(RESEND_API_KEY);
 
+// --- AUTOMATED CALENDAR UTILITIES ---
+
+// Helper to convert a Date object to clean standard YYYY-MM-DD
+function formatDateString(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// Helper to calculate floating weekdays (e.g., "3rd Monday of January")
+function getNthWeekday(year, month, dayOfWeek, n) {
+  let date = new Date(year, month, 1);
+  let count = 0;
+  while (date.getMonth() === month) {
+    if (date.getDay() === dayOfWeek) {
+      count++;
+      if (count === n) return new Date(date);
+    }
+    date.setDate(date.getDate() + 1);
+  }
+}
+
+// Helper to calculate the last Monday of a given month (Memorial Day)
+function getLastMonday(year, month) {
+  let date = new Date(year, month + 1, 0); 
+  while (date.getDay() !== 1) {
+    date.setDate(date.getDate() - 1);
+  }
+  return new Date(date);
+}
+
+// Helper to apply standard weekend observance layout rules (If Sunday -> Monday. If Saturday -> Friday)
+function getObservedDate(year, month, day, skipSaturdayObserved = false) {
+  let d = new Date(year, month, day);
+  if (d.getDay() === 0) d.setDate(day + 1); // Move Sunday holiday to Monday
+  if (d.getDay() === 6 && !skipSaturdayObserved) d.setDate(day - 1); // Move Saturday holiday to Friday
+  return d;
+}
+
+// MASTER ENGINE: Dynamically generates the exact US Market Holidays for ANY year
+function getMarketHolidays(year) {
+  const holidays = [];
+
+  // 1. New Year's Day (Jan 1 - NYSE doesn't observe preceding Friday if it falls on Saturday)
+  const ny = new Date(year, 0, 1);
+  holidays.push(formatDateString(ny.getDay() === 0 ? new Date(year, 0, 2) : ny));
+
+  // 2. MLK Jr. Day (3rd Monday in January)
+  holidays.push(formatDateString(getNthWeekday(year, 0, 1, 3)));
+
+  // 3. Presidents' Day (3rd Monday in February)
+  holidays.push(formatDateString(getNthWeekday(year, 1, 1, 3)));
+
+  // 4. Good Friday (Calculated via Butcher-Meeus Easter algorithm)
+  const a = year % 19; const b = Math.floor(year / 100); const c = year % 100;
+  const d = Math.floor(b / 4); const e = b % 4; const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3); const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4); const k = c % 4; const L = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * L) / 451);
+  const easterMonth = Math.floor((h + L - 7 * m + 114) / 31);
+  const easterDay = ((h + L - 7 * m + 114) % 31) + 1;
+  const goodFriday = new Date(year, easterMonth - 1, easterDay - 2);
+  holidays.push(formatDateString(goodFriday));
+
+  // 5. Memorial Day (Last Monday in May)
+  holidays.push(formatDateString(getLastMonday(year, 4)));
+
+  // 6. Juneteenth (June 19 + Observance rules)
+  holidays.push(formatDateString(getObservedDate(year, 5, 19)));
+
+  // 7. Independence Day (July 4 + Observance rules)
+  holidays.push(formatDateString(getObservedDate(year, 6, 4)));
+
+  // 8. Labor Day (1st Monday in September)
+  holidays.push(formatDateString(getNthWeekday(year, 8, 1, 1)));
+
+  // 9. Thanksgiving Day (4th Thursday in November)
+  holidays.push(formatDateString(getNthWeekday(year, 10, 4, 4)));
+
+  // 10. Christmas Day (December 25 + Observance rules)
+  holidays.push(formatDateString(getObservedDate(year, 11, 25)));
+
+  return holidays;
+}
+
+// --- END AUTOMATED CALENDAR UTILITIES ---
+
+
 async function checkAndSendAlerts() {
   try {
     const now = new Date();
@@ -24,34 +113,19 @@ async function checkAndSendAlerts() {
 
     console.log(`[${new Date().toLocaleTimeString()}] Mass Scan Initiated for: ${currentAlertTime}...`);
 
-// CLOCK-BASED MARKET HOURLY CHECK (Wall-clock monitoring)
+    // AUTOMATED CALENDAR MATCHING
     const pacificDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
-    const laDay = pacificDate.getDay(); // 0 = Sunday, 6 = Saturday
+    const laDay = pacificDate.getDay(); 
     const laHour = pacificDate.getHours();
     const laMinute = pacificDate.getMinutes();
-
-    // Generate accurate YYYY-MM-DD mapping for California calendar day
     const formatYear = pacificDate.getFullYear();
-    const formatMonth = String(pacificDate.getMonth() + 1).padStart(2, '0');
-    const formatDay = String(pacificDate.getDate()).padStart(2, '0');
-    const laDateString = `${formatYear}-${formatMonth}-${formatDay}`;
 
-    // Official 2026 US Stock Market Holiday Tracking Schedule
-    const marketHolidays2026 = [
-      '2026-01-01', // New Year's Day
-      '2026-01-19', // Martin Luther King Jr. Day
-      '2026-02-16', // Presidents' Day
-      '2026-04-03', // Good Friday
-      '2026-05-25', // Memorial Day
-      '2026-06-19', // Juneteenth
-      '2026-07-03', // Independence Day (Observed)
-      '2026-09-07', // Labor Day
-      '2026-11-26', // Thanksgiving Day
-      '2026-12-25'  // Christmas Day
-    ];
+    // Dynamically calculate the active year's calendar list on the fly!
+    const activeMarketHolidays = getMarketHolidays(formatYear);
+    const laDateString = formatDateString(pacificDate);
 
     const isWeekend = (laDay === 0 || laDay === 6);
-    const isHoliday = marketHolidays2026.includes(laDateString);
+    const isHoliday = activeMarketHolidays.includes(laDateString);
 
     // NYSE/NASDAQ regular session: Mon-Fri, 6:30 AM to 1:00 PM Pacific Time
     const isMarketOpen = !isWeekend && !isHoliday && 
@@ -95,12 +169,12 @@ async function checkAndSendAlerts() {
     const pushBatch = [];
     const emailBatch = [];
 
-// 4. GROUPING ENGINE: Bucket alerts by user recipient to prevent spamming
+    // 4. GROUPING ENGINE: Bucket alerts by user recipient to prevent spamming
     const emailGroups = {}; 
     const pushGroups = {};  
 
     for (const alert of alerts) {
-      // SMART FILTER CHECK: If toggle is enabled, skip processing completely on weekends/holidays
+      // SMART FILTER CHECK: Safely blocks delivery if user toggled weekend/holiday restrictions
       if (alert.market_days_only && (isWeekend || isHoliday)) {
         continue; 
       }
@@ -114,7 +188,6 @@ async function checkAndSendAlerts() {
 
       if (!livePrice || isNaN(livePrice)) continue;
 
-      const isAfterHours = (changeValue === 0 && changePercent === 0);
       const marketLabel = isAfterHours ? 'At Close' : 'Today';
       const timingPhrase = marketLabel.toLowerCase();
 
@@ -134,14 +207,12 @@ async function checkAndSendAlerts() {
         timingPhrase
       };
 
-      // Group for email channels
       if (alert.send_email && alert.email) {
         const targetEmail = alert.alert_email || alert.email;
         if (!emailGroups[targetEmail]) emailGroups[targetEmail] = [];
         emailGroups[targetEmail].push(assetSummary);
       }
 
-      // Group for push notification channels
       if (alert.send_push && alert.push_token) {
         if (!pushGroups[alert.push_token]) pushGroups[alert.push_token] = [];
         pushGroups[alert.push_token].push(assetSummary);
@@ -149,19 +220,15 @@ async function checkAndSendAlerts() {
     }
 
     // 5. COMPILING BULK PACKETS
-    
-    // Compile Grouped Push Notifications
     for (const [token, assets] of Object.entries(pushGroups)) {
       let pushTitle = '';
       let pushBody = '';
 
       if (assets.length === 1) {
-        // Single alert layout remains classic
         const item = assets[0];
         pushTitle = item.changeValue !== 0 ? `📈 ${item.ticker} Alert: ${item.formattedChange}` : `📊 ${item.ticker} Alert: $${item.livePrice}`;
         pushBody = `${item.ticker} is trading at $${item.livePrice} (${item.formattedPercent}) ${item.timingPhrase}.`;
       } else {
-        // Multi-asset bundled summary text
         pushTitle = `💼 Portfolio Alert: ${assets.length} Stocks Updated`;
         pushBody = assets.map(a => `${a.ticker}: $${a.livePrice} (${a.formattedPercent})`).join(' | ');
       }
@@ -174,14 +241,12 @@ async function checkAndSendAlerts() {
       });
     }
 
-    // Compile Grouped HTML Emails
     for (const [targetEmail, assets] of Object.entries(emailGroups)) {
       const subjectTime = currentAlertTime;
       const emailSubject = assets.length === 1 
         ? `${assets[0].ticker}: $${assets[0].livePrice} (${assets[0].formattedPercent}) at ${subjectTime}`
         : `Market Digest: ${assets.length} Alerts Synchronized at ${subjectTime}`;
 
-      // Build out dynamic rows for every asset inside the user's digest bundle
       let assetsHtmlRows = '';
       for (const item of assets) {
         assetsHtmlRows += `
