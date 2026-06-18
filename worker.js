@@ -24,14 +24,37 @@ async function checkAndSendAlerts() {
 
     console.log(`[${new Date().toLocaleTimeString()}] Mass Scan Initiated for: ${currentAlertTime}...`);
 
-    // CLOCK-BASED MARKET HOURLY CHECK (Wall-clock monitoring)
+// CLOCK-BASED MARKET HOURLY CHECK (Wall-clock monitoring)
     const pacificDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
     const laDay = pacificDate.getDay(); // 0 = Sunday, 6 = Saturday
     const laHour = pacificDate.getHours();
     const laMinute = pacificDate.getMinutes();
 
+    // Generate accurate YYYY-MM-DD mapping for California calendar day
+    const formatYear = pacificDate.getFullYear();
+    const formatMonth = String(pacificDate.getMonth() + 1).padStart(2, '0');
+    const formatDay = String(pacificDate.getDate()).padStart(2, '0');
+    const laDateString = `${formatYear}-${formatMonth}-${formatDay}`;
+
+    // Official 2026 US Stock Market Holiday Tracking Schedule
+    const marketHolidays2026 = [
+      '2026-01-01', // New Year's Day
+      '2026-01-19', // Martin Luther King Jr. Day
+      '2026-02-16', // Presidents' Day
+      '2026-04-03', // Good Friday
+      '2026-05-25', // Memorial Day
+      '2026-06-19', // Juneteenth
+      '2026-07-03', // Independence Day (Observed)
+      '2026-09-07', // Labor Day
+      '2026-11-26', // Thanksgiving Day
+      '2026-12-25'  // Christmas Day
+    ];
+
+    const isWeekend = (laDay === 0 || laDay === 6);
+    const isHoliday = marketHolidays2026.includes(laDateString);
+
     // NYSE/NASDAQ regular session: Mon-Fri, 6:30 AM to 1:00 PM Pacific Time
-    const isMarketOpen = (laDay >= 1 && laDay <= 5) && 
+    const isMarketOpen = !isWeekend && !isHoliday && 
                          ((laHour === 6 && laMinute >= 30) || (laHour > 6 && laHour < 13));
     const isAfterHours = !isMarketOpen;
 
@@ -72,11 +95,16 @@ async function checkAndSendAlerts() {
     const pushBatch = [];
     const emailBatch = [];
 
-   // 4. GROUPING ENGINE: Bucket alerts by user recipient to prevent spamming
-    const emailGroups = {}; // Maps email -> array of processed stock data
-    const pushGroups = {};  // Maps push_token -> array of processed stock data
+// 4. GROUPING ENGINE: Bucket alerts by user recipient to prevent spamming
+    const emailGroups = {}; 
+    const pushGroups = {};  
 
     for (const alert of alerts) {
+      // SMART FILTER CHECK: If toggle is enabled, skip processing completely on weekends/holidays
+      if (alert.market_days_only && (isWeekend || isHoliday)) {
+        continue; 
+      }
+
       const stockData = priceMap[alert.ticker]; 
       if (!stockData) continue;
 
